@@ -39,7 +39,8 @@ def extract_sift_features(
     keypoints   : list of cv2.KeyPoint
     descriptors : np.ndarray, shape (N, 128), dtype float32
     """
-    sift = cv2.SIFT_create(nfeatures=n_features)
+    # sift = cv2.SIFT_create(nfeatures=n_features)
+    sift = cv2.SIFT_create(nfeatures=5000, contrastThreshold=0.03, edgeThreshold=10)
     keypoints, descriptors = sift.detectAndCompute(gray_image, None)
     return keypoints, descriptors
 
@@ -126,6 +127,20 @@ def lowes_ratio_test(
     if N < 3:
         return []
 
+    # ── 1. Apply Spatial Constraint BEFORE NN Search ───────────────
+    # If we don't do this, overlapping SIFT keypoints (spatially close) 
+    # will be selected as the 2nd Nearest Neighbor, which makes d1 ≈ d2 
+    # and causes valid matches to falsely fail Lowe's Ratio Test!
+    kp_xy = np.array([kp.pt for kp in keypoints])  # (N, 2)
+    # Compute pairwise spatial distances (vectorized is O(N^2) memory, fine for N<5000)
+    # To save memory, we can use broadcasting:
+    spatial_dist_sq = np.sum((kp_xy[:, None, :] - kp_xy[None, :, :]) ** 2, axis=-1)
+    
+    # Set descriptor distance to infinity for keypoints that are too close spatially
+    # (This also correctly handles the diagonal, which is distance 0)
+    min_sq = min_spatial_dist ** 2
+    distance_matrix[spatial_dist_sq < min_sq] = np.inf
+
     # ── Vectorised 2-NN search ──────────────────────────────────────
     # argpartition is O(N) per row (vs O(N log N) for argsort).
     idx_2nn   = np.argpartition(distance_matrix, kth=2, axis=1)[:, :2]
@@ -151,18 +166,60 @@ def lowes_ratio_test(
     query_ids = np.where(ratio_mask)[0]
     match_ids = best_idx[query_ids]
 
-    deltas     = kp_xy[query_ids] - kp_xy[match_ids]
-    spatial_d  = np.linalg.norm(deltas, axis=1)
-    space_mask = spatial_d >= min_spatial_dist
-
-    query_ids = query_ids[space_mask]
-    match_ids = match_ids[space_mask]
+    # ── Symmetric Cross-Check (Mutual Nearest Neighbors) ────────────
+    # A match is only valid if query_i's best match is match_j, 
+    # AND match_j's best match is query_i.
+    cross_check_mask = (best_idx[match_ids] == query_ids)
+    
+    query_ids = query_ids[cross_check_mask]
+    match_ids = match_ids[cross_check_mask]
 
     return list(zip(query_ids.tolist(), match_ids.tolist()))
 
 
 # ──────────────────────────────────────────────────────────────────────
-# 4. CONVENIENCE WRAPPER
+# 4. SPATIAL DENSITY FILTERING
+# ──────────────────────────────────────────────────────────────────────
+
+def spatial_density_filter(
+    matches: List[Tuple[int, int]],
+    keypoints: list,
+    radius: float = 50.0,
+    min_neighbors: int = 3
+) -> List[Tuple[int, int]]:
+    """
+    Remove isolated "stray" matches that don't belong to a cluster.
+    
+    In copy-move forgery, a copied region will generate a dense cluster 
+    of matches. Stray false matches will be isolated. A match is kept only 
+    if it has at least `min_neighbors` other matches nearby in BOTH the 
+    source region and the destination region.
+    """
+    if not matches:
+        return []
+
+    kp_xy = np.array([kp.pt for kp in keypoints])
+    src_pts = kp_xy[[m[0] for m in matches]]
+    dst_pts = kp_xy[[m[1] for m in matches]]
+    
+    valid_matches = []
+    # Vectorized computation of pairwise distances is possible, but 
+    # a simple loop is fine since len(matches) is usually < 1000 after ratio test.
+    for i in range(len(matches)):
+        src_dist = np.linalg.norm(src_pts - src_pts[i], axis=1)
+        dst_dist = np.linalg.norm(dst_pts - dst_pts[i], axis=1)
+        
+        # A match is a neighbor if it's close in BOTH source and dest spaces
+        neighbors = np.sum((src_dist < radius) & (dst_dist < radius)) - 1 # subtract self
+        
+        if neighbors >= min_neighbors:
+            valid_matches.append(matches[i])
+            
+    return valid_matches
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 5. CONVENIENCE WRAPPER
 # ──────────────────────────────────────────────────────────────────────
 
 def match_keypoints(
@@ -189,7 +246,10 @@ def match_keypoints(
         return []
 
     dist_mat = compute_distance_matrix(descriptors)
-    return lowes_ratio_test(dist_mat, keypoints, ratio, min_spatial_dist)
+    matches = lowes_ratio_test(dist_mat, keypoints, ratio, min_spatial_dist)
+    
+    # Apply density filter to kill isolated blobs but keep smaller legitimate clusters
+    return spatial_density_filter(matches, keypoints, radius=100.0, min_neighbors=1)
 
 
 def draw_matches(image: np.ndarray,

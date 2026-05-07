@@ -24,7 +24,7 @@ def create_binary_mask(
     image_shape: Tuple[int, int],
     keypoints: list,
     inliers: List[Tuple[int, int]],
-    radius: int = 8,
+    radius: int = 4,
 ) -> np.ndarray:
     """
     Build a binary detection mask by marking inlier keypoint locations.
@@ -158,17 +158,16 @@ def manual_closing(mask: np.ndarray, kernel_size: int = 15) -> np.ndarray:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# 3. IoU  —  INTERSECTION OVER UNION
+# 3. METRICS: IoU AND DICE
 # ──────────────────────────────────────────────────────────────────────
 
-def compute_iou(pred_mask: np.ndarray, gt_mask: np.ndarray) -> float:
+def compute_metrics(pred_mask: np.ndarray, gt_mask: np.ndarray) -> Tuple[float, float]:
     """
-    Intersection over Union between the predicted and ground-truth masks.
+    Calculate Intersection over Union (IoU) and DICE coefficient (F1 Score) 
+    between the predicted and ground-truth masks.
 
-        IoU = |Pred ∩ GT| / |Pred ∪ GT|
-
-    Both masks are binarised at threshold 127 so any encoding (0/1 or
-    0/255) is handled gracefully.
+        IoU  = |Pred ∩ GT| / |Pred ∪ GT|
+        DICE = 2 * |Pred ∩ GT| / (|Pred| + |GT|)
 
     Parameters
     ----------
@@ -177,7 +176,7 @@ def compute_iou(pred_mask: np.ndarray, gt_mask: np.ndarray) -> float:
 
     Returns
     -------
-    float in [0, 1].  Returns 0.0 if union is empty.
+    iou, dice : Tuple of floats in [0, 1].
     """
     # Binarise
     p = (pred_mask > 127).astype(np.uint8)
@@ -189,11 +188,12 @@ def compute_iou(pred_mask: np.ndarray, gt_mask: np.ndarray) -> float:
 
     intersection = np.sum(p & g)
     union        = np.sum(p | g)
+    total_area   = np.sum(p) + np.sum(g)
 
-    if union == 0:
-        return 0.0
+    iou = float(intersection) / float(union) if union > 0 else 0.0
+    dice = 2.0 * float(intersection) / float(total_area) if total_area > 0 else 0.0
 
-    return float(intersection) / float(union)
+    return iou, dice
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -205,19 +205,19 @@ def postprocess(
     keypoints: list,
     inliers: List[Tuple[int, int]],
     gt_mask: Optional[np.ndarray] = None,
-    circle_radius: int = 8,
-    dilate_size: int = 7,
-    close_size: int = 15,
-) -> Tuple[np.ndarray, Optional[float]]:
+    circle_radius: int = 4,
+    dilate_size: int = 5,
+    close_size: int = 9,
+) -> Tuple[np.ndarray, Optional[float], Optional[float]]:
     """
-    End-to-end post-processing: mask creation → dilation → closing → IoU.
+    End-to-end post-processing: mask creation → dilation → closing → Metrics.
 
     Parameters
     ----------
     image_shape    : (H, W) of the input image.
     keypoints      : list of cv2.KeyPoint.
     inliers        : Inlier matches from RANSAC.
-    gt_mask        : Optional ground-truth mask for IoU.
+    gt_mask        : Optional ground-truth mask for metrics.
     circle_radius  : Radius for initial keypoint circles.
     dilate_size    : Kernel size for extra dilation pass.
     close_size     : Kernel size for morphological closing.
@@ -226,16 +226,18 @@ def postprocess(
     -------
     final_mask : Refined binary mask (H, W), uint8 {0, 255}.
     iou        : IoU score (None if gt_mask not provided).
+    dice       : DICE score (None if gt_mask not provided).
     """
     raw_mask  = create_binary_mask(image_shape, keypoints, inliers, circle_radius)
     dilated   = manual_dilate(raw_mask, dilate_size)
     final_mask = manual_closing(dilated, close_size)
 
     iou = None
+    dice = None
     if gt_mask is not None:
         # Ensure GT is single-channel
         if gt_mask.ndim == 3:
             gt_mask = gt_mask[:, :, 0]
-        iou = compute_iou(final_mask, gt_mask)
+        iou, dice = compute_metrics(final_mask, gt_mask)
 
-    return final_mask, iou
+    return final_mask, iou, dice

@@ -229,3 +229,70 @@ def ransac_homography(
     best_inliers = [matches[i] for i in inlier_indices]
 
     return best_H, best_inliers
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 4. SEQUENTIAL RANSAC  (multi-object copy-move detection)
+# ──────────────────────────────────────────────────────────────────────
+
+def sequential_ransac(
+    matches: List[Tuple[int, int]],
+    keypoints: list,
+    threshold: float = 5.0,
+    max_iterations: int = 2000,
+    min_inliers: int = 6,
+    max_models: int = 5,
+    seed: int = 42,
+) -> List[Tuple[Optional[np.ndarray], List[Tuple[int, int]]]]:
+    """
+    Find multiple copy-move forgeries by running RANSAC sequentially.
+
+    In a single image, the forger may have pasted the same region to
+    multiple locations, each with a different geometric transformation.
+    Standard RANSAC finds only the dominant one.
+
+    Sequential RANSAC works as follows:
+        1. Run RANSAC on all matches → get H₁ and inlier set I₁.
+        2. Remove I₁ from the match pool.
+        3. Run RANSAC again on the remaining matches → H₂, I₂.
+        4. Repeat until fewer than `min_inliers` are found or
+           `max_models` transformations have been extracted.
+
+    Parameters
+    ----------
+    matches        : All accepted matches from the matcher.
+    keypoints      : list of cv2.KeyPoint.
+    threshold      : RANSAC inlier pixel tolerance.
+    max_iterations : Iterations per RANSAC round.
+    min_inliers    : Stop if a round finds fewer inliers than this.
+    max_models     : Maximum number of transformations to extract.
+    seed           : RNG seed.
+
+    Returns
+    -------
+    List of (H, inliers) tuples — one per detected forgery cluster.
+    """
+    results = []
+    remaining = list(matches)
+
+    for i in range(max_models):
+        if len(remaining) < 4:
+            break
+
+        H, inliers = ransac_homography(
+            remaining, keypoints,
+            threshold=threshold,
+            max_iterations=max_iterations,
+            seed=seed + i,       # vary seed each round
+        )
+
+        if H is None or len(inliers) < min_inliers:
+            break
+
+        results.append((H, inliers))
+
+        # Remove inliers from the pool for the next round
+        inlier_set = set(inliers)
+        remaining = [m for m in remaining if m not in inlier_set]
+
+    return results
