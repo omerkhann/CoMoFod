@@ -28,7 +28,6 @@ from postprocessing  import postprocess
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
-
 def _build_catalogue():
     """
     Scan the /data folder and return a dict mapping display names to

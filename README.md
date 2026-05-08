@@ -6,18 +6,34 @@ A comprehensive Digital Image Processing (DIP) project for detecting copy-move f
 
 Copy-Move Forgery is a specific type of image manipulation where a part of an image is copied and pasted into another part of the same image, typically to hide an object or duplicate a feature. This project provides a robust detection system with a professional dashboard interface built using Gradio.
 
+## Importance & Applications
+
+### The Challenge
+Digital images are increasingly used as legal evidence, in news reporting, and for scientific documentation. However, with modern editing tools, **Copy-Move Forgery** has become one of the most common and difficult-to-detect manipulations. Since the cloned region comes from the same source, its statistical properties (noise, color, texture) match perfectly, making it nearly invisible to the human eye and traditional detection methods.
+
+### Rationale: Why it is Needed
+*   **Preserving Digital Trust**: In an era of misinformation, verifying the authenticity of visual media is critical for maintaining public trust.
+*   **Legal Integrity**: Automated detection ensures that digital evidence presented in legal proceedings is tamper-free.
+*   **Scientific Accuracy**: Prevents "image recycling" or fraudulent data duplication in research publications.
+
+### Key Domains
+*   **Forensic Investigation**: Verifying courtroom evidence and criminal records.
+*   **Journalism & Media**: Fact-checking and verifying the integrity of news photography.
+*   **Medical Imaging**: Ensuring biological scans haven't been altered to misrepresent medical results.
+*   **Insurance & Finance**: Detecting fraudulent claims involving manipulated property or accident photos.
+
 ## Key Features
 
 - **Preprocessing**: Grayscale conversion using the luminance formula and Gaussian smoothing for noise reduction.
 - **Feature Extraction**: SIFT (Scale-Invariant Feature Transform) for detecting robust keypoints and descriptors.
-- **Manual Matcher**: Custom-coded pairwise Euclidean distance computation with Lowe's Ratio Test and symmetric cross-checking.
-- **Sequential RANSAC**: Iterative RANSAC implementation using Direct Linear Transform (DLT) and SVD to detect multiple forgery clusters within a single image.
-- **Morphological Post-processing**: Manual implementation of Dilation and Closing operations to refine detection masks.
-- **Statistical Analysis**: Real-time calculation of Intersection over Union (IoU) and DICE Coefficient (F1 Score) against ground truth data.
+- **Custom Matcher**: Custom-coded pairwise Euclidean distance computation with Lowe's Ratio Test and symmetric cross-checking.
+- **Sequential RANSAC**: Sequential RANSAC implementation using Direct Linear Transform (DLT) and SVD to detect multiple forgery clusters within a single image.
+- **Custom Post-processing**: Implementation of Dilation and Closing operations to refine detection masks.
+- **Statistical Analysis**: Calculation of Intersection over Union (IoU) and DICE Coefficient (F1 Score) against ground truth data.
 
 ## Dataset
 
-The project is designed to work with the CoMoFoD dataset. A cleaned version of the dataset used for this project is available on Kaggle:
+The project is designed to work with the CoMoFoD dataset. A cleaned version (consists of 40 translated, 40 scaled, and 40 rotated images) of the dataset used for this project is available on Kaggle:
 
 [CoMoFoD Cleaned Dataset](https://www.kaggle.com/datasets/muhammadomerkhan03/comofod-cleaned-dataset)
 
