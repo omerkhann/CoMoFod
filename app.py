@@ -62,7 +62,7 @@ CATALOGUE = _build_catalogue()
 # PIPELINE
 # ──────────────────────────────────────────────────────────────────────
 
-def run_pipeline(image_bgr, gt_mask_path, ratio, ransac_thresh):
+def run_pipeline(image_bgr, gt_mask_path, ratio, ransac_thresh, circle_radius, dilate_size, close_size):
     """Run the full CMFD pipeline on a single BGR image."""
     # 1. Preprocess
     gray = preprocess(image_bgr, smooth=True, kernel_size=3, sigma=1.0)
@@ -96,10 +96,12 @@ def run_pipeline(image_bgr, gt_mask_path, ratio, ransac_thresh):
         all_inliers.extend(inliers)
 
     if not all_inliers:
-        all_inliers = matches  # fall back to raw matches for visualization
+        vis_inliers = matches  # fall back to raw matches ONLY for visualization
+    else:
+        vis_inliers = all_inliers
 
     # 5. Visualise matches
-    vis_matches = draw_matches(image_bgr, keypoints, all_inliers)
+    vis_matches = draw_matches(image_bgr, keypoints, vis_inliers)
 
     # 6. Post-process → mask + metrics
     gt_mask = None
@@ -109,7 +111,7 @@ def run_pipeline(image_bgr, gt_mask_path, ratio, ransac_thresh):
     mask, iou, dice = postprocess(
         image_bgr.shape[:2], keypoints, all_inliers,
         gt_mask=gt_mask,
-        circle_radius=6, dilate_size=11, close_size=21,
+        circle_radius=circle_radius, dilate_size=dilate_size, close_size=close_size,
     )
 
     # Build styled HTML metric cards
@@ -175,7 +177,7 @@ def run_pipeline(image_bgr, gt_mask_path, ratio, ransac_thresh):
 # GRADIO CALLBACKS
 # ──────────────────────────────────────────────────────────────────────
 
-def on_dataset_image(selection, ratio, ransac_thresh):
+def on_dataset_image(selection, ratio, ransac_thresh, circle_radius, dilate_size, close_size):
     """Callback when user picks an image from the dropdown."""
     if selection is None or selection not in CATALOGUE:
         return None, None, None, None, "Select an image from the dropdown."
@@ -189,13 +191,13 @@ def on_dataset_image(selection, ratio, ransac_thresh):
     unforged_rgb = cv2.cvtColor(original_bgr, cv2.COLOR_BGR2RGB) if original_bgr is not None else None
 
     original_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    vis, mask, info = run_pipeline(image_bgr, entry["gt"], ratio, ransac_thresh)
+    vis, mask, info = run_pipeline(image_bgr, entry["gt"], ratio, ransac_thresh, circle_radius, dilate_size, close_size)
     vis_rgb = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
 
     return unforged_rgb, original_rgb, vis_rgb, mask, info
 
 
-def on_upload_image(upload, ratio, ransac_thresh):
+def on_upload_image(upload, ratio, ransac_thresh, circle_radius, dilate_size, close_size):
     """Callback when user uploads a custom image."""
     if upload is None:
         return None, None, None, None, "Upload an image to analyse."
@@ -204,7 +206,7 @@ def on_upload_image(upload, ratio, ransac_thresh):
     image_rgb = upload
     image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
 
-    vis, mask, info = run_pipeline(image_bgr, None, ratio, ransac_thresh)
+    vis, mask, info = run_pipeline(image_bgr, None, ratio, ransac_thresh, circle_radius, dilate_size, close_size)
     vis_rgb = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
 
     return None, image_rgb, vis_rgb, mask, info
@@ -298,6 +300,24 @@ def build_ui():
                     info="Max reprojection error to count as inlier",
                 )
 
+                gr.Markdown("---")
+                gr.Markdown("### Morphological Parameters")
+                circle_slider = gr.Slider(
+                    minimum=1, maximum=15, value=6, step=1,
+                    label="Keypoint Circle Radius",
+                    info="Size of circles drawn for inliers",
+                )
+                dilate_slider = gr.Slider(
+                    minimum=1, maximum=31, value=11, step=2,
+                    label="Dilation Kernel Size",
+                    info="Expands the masked regions (must be odd)",
+                )
+                close_slider = gr.Slider(
+                    minimum=1, maximum=51, value=21, step=2,
+                    label="Closing Kernel Size",
+                    info="Fills gaps between regions (must be odd)",
+                )
+
             # ── Right: Outputs ─────────────────────────────────────
             with gr.Column(scale=2, min_width=500):
                 info_box = gr.HTML(
@@ -319,12 +339,12 @@ def build_ui():
         # ── Wire callbacks ─────────────────────────────────────────
         btn_dataset.click(
             fn=on_dataset_image,
-            inputs=[dropdown, ratio_slider, ransac_slider],
+            inputs=[dropdown, ratio_slider, ransac_slider, circle_slider, dilate_slider, close_slider],
             outputs=[out_unforged, out_forged, out_matches, out_mask, info_box],
         )
         btn_upload.click(
             fn=on_upload_image,
-            inputs=[upload, ratio_slider, ransac_slider],
+            inputs=[upload, ratio_slider, ransac_slider, circle_slider, dilate_slider, close_slider],
             outputs=[out_unforged, out_forged, out_matches, out_mask, info_box],
         )
 

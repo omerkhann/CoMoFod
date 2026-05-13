@@ -1,5 +1,5 @@
 """
-Manual RANSAC Module for Copy-Move Forgery Detection (CMFD).
+RANSAC Module for Copy-Move Forgery Detection (CMFD).
 
 Implements the full RANSAC loop **from scratch** — NO cv2.findHomography.
 
@@ -13,6 +13,7 @@ Pipeline:
 """
 
 import numpy as np
+import cv2
 from typing import Tuple, List, Optional
 
 
@@ -131,7 +132,7 @@ def apply_homography(H: np.ndarray, pts: np.ndarray) -> np.ndarray:
 
     # Dehomogenise — guard against w ≈ 0
     w = proj[:, 2:3]
-    w = np.where(np.abs(w) < 1e-10, 1e-10, w)
+    w = np.where(np.abs(w) < 1e-10, 1e-10 * np.sign(w + 1e-15), w)
     return proj[:, :2] / w
 
 
@@ -177,14 +178,31 @@ def ransac_homography(
     if len(matches) < 4:
         return None, []
 
-    rng = np.random.RandomState(seed)
-
-    # Pre-extract all match coordinates into arrays for vectorised error calc
+    # Pre-extract all match coordinates into arrays
     kp_xy = np.array([kp.pt for kp in keypoints])       # (K, 2)
     src_all = kp_xy[[m[0] for m in matches]]             # (M, 2)
     dst_all = kp_xy[[m[1] for m in matches]]             # (M, 2)
 
+    # ── BUILT-IN OPENCV RANSAC (Testing Flow) ─────────────
+    # We use cv2.RANSAC to find the homography and get an inlier mask
+    H, mask = cv2.findHomography(src_all, dst_all, cv2.RANSAC, threshold, maxIters=max_iterations)
+
+    if H is None or mask is None:
+        return None, []
+
+    # Mask is an (M, 1) array where 1 means inlier, 0 means outlier
+    best_inliers = [matches[i] for i in range(len(matches)) if mask[i][0] == 1]
+    
+    return H, best_inliers
+
+    ''' 
+    # --- ORIGINAL MANUAL RANSAC KEEP FOR REFERENCE ---
+    rng = np.random.RandomState(seed)
+
     M = len(matches)
+    if M == 4:
+        max_iterations = 1 # Only one possible combination!
+
     best_inlier_count = 0
     best_inlier_mask  = None
     best_H            = None
@@ -229,6 +247,7 @@ def ransac_homography(
     best_inliers = [matches[i] for i in inlier_indices]
 
     return best_H, best_inliers
+    '''
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ from typing import Tuple, List
 
 
 # ──────────────────────────────────────────────────────────────────────
-# 1. SIFT FEATURE EXTRACTION  (cv2 allowed)
+# 1. SIFT FEATURE EXTRACTION
 # ──────────────────────────────────────────────────────────────────────
 
 def extract_sift_features(
@@ -132,9 +132,10 @@ def lowes_ratio_test(
     # will be selected as the 2nd Nearest Neighbor, which makes d1 ≈ d2 
     # and causes valid matches to falsely fail Lowe's Ratio Test!
     kp_xy = np.array([kp.pt for kp in keypoints])  # (N, 2)
-    # Compute pairwise spatial distances (vectorized is O(N^2) memory, fine for N<5000)
-    # To save memory, we can use broadcasting:
-    spatial_dist_sq = np.sum((kp_xy[:, None, :] - kp_xy[None, :, :]) ** 2, axis=-1)
+    # Compute pairwise spatial distances efficiently using algebraic expansion
+    sq_norms_xy = np.sum(kp_xy ** 2, axis=1, keepdims=True)
+    spatial_dist_sq = sq_norms_xy + sq_norms_xy.T - 2.0 * (kp_xy @ kp_xy.T)
+    spatial_dist_sq = np.maximum(spatial_dist_sq, 0.0) # Guard against floating point drift
     
     # Set descriptor distance to infinity for keypoints that are too close spatially
     # (This also correctly handles the diagonal, which is distance 0)
