@@ -73,15 +73,18 @@ def compute_distance_matrix(desc: np.ndarray) -> np.ndarray:
         Entry [i, j] = ‖desc[i] − desc[j]‖₂.
     """
     d = desc.astype(np.float64)
-
-    sq_norms = np.sum(d ** 2, axis=1, keepdims=True)   # (N, 1)
-    dot      = d @ d.T                                  # (N, N)
-
-    dist_sq = sq_norms + sq_norms.T - 2.0 * dot
-    dist_sq = np.maximum(dist_sq, 0.0)                  # numerical guard
-
+    
+    # Using the identity: ||a-b||^2 = ||a||^2 + ||b||^2 - 2<a,b>
+    # We compute it carefully to avoid any weirdness
+    sq_norms = np.einsum('ij,ij->i', d, d)  # (N,)
+    dot = np.dot(d, d.T)                    # (N, N)
+    
+    # Use broadcasting to get (N, N) distance squared matrix
+    dist_sq = sq_norms[:, np.newaxis] + sq_norms[np.newaxis, :] - 2.0 * dot
+    dist_sq = np.maximum(dist_sq, 0.0)      # numerical guard
+    
     distances = np.sqrt(dist_sq)
-    np.fill_diagonal(distances, np.inf)                  # forbid self-match
+    np.fill_diagonal(distances, np.inf)      # forbid self-match
     return distances
 
 
@@ -160,6 +163,7 @@ def lowes_ratio_test(
     # ── Ratio test (vectorised) ─────────────────────────────────────
     with np.errstate(divide="ignore", invalid="ignore"):
         ratios = np.where(d2 > 0, d1 / d2, 1.0)
+    
     ratio_mask = ratios < ratio_threshold
 
     # ── Spatial distance filter ─────────────────────────────────────
